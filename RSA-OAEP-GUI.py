@@ -63,13 +63,13 @@ def encrypt(message, public_key):
         raise ValueError("Messsage exceeds the key size")
     
     # RSA encryption formula: c = m^e mod n
-    cyphertext = (message ** public_key[0]) % public_key[1]
+    cyphertext = pow(message, public_key[0], public_key[1])
     return cyphertext
 
 #Adapted from slide 9 CIS 2025 page 19
 def decrypt(message, private_key):
     # RSA decryption formula: m = c^d mod n
-    message = (message ** private_key[0]) % private_key[1]
+    message = pow(message, private_key[0], private_key[1])
 
     #Bytes to integer conversion, then to bytes, +7 to approximate the nearest byte size that can accomodate the message
     byte_len = (message.bit_length() + 7) // 8
