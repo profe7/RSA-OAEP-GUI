@@ -6,6 +6,8 @@
 
 from sympy import randprime
 from random import randint
+import hashlib
+import os
 
 def randomprimegenerator(bits):
     #Lower bound if 2048 2^2047
@@ -54,30 +56,70 @@ def keygenerator():
 
     return (e, n), (d, n)
 
-#Adapted from slide 9 CIS 2025 page 19
 def encrypt(message, public_key):
-    # Convert message to bytes and then to an integer
-    message = int.from_bytes(message.encode(), "big")
-
-    if message > public_key[1]:
-        raise ValueError("Messsage exceeds the key size")
-    
-    # RSA encryption formula: c = m^e mod n
-    cyphertext = pow(message, public_key[0], public_key[1])
+    # OAEP encode
+    n_bytes = (public_key[1].bit_length() + 7) // 8
+    message_bytes = message.encode()
+    em = oaep_encode(message_bytes, n_bytes)
+    m_int = int.from_bytes(em, "big")
+    if m_int > public_key[1]:
+        raise ValueError("Message too long for this key size")
+    cyphertext = pow(m_int, public_key[0], public_key[1])
     return cyphertext
 
-#Adapted from slide 9 CIS 2025 page 19
-def decrypt(message, private_key):
-    # RSA decryption formula: m = c^d mod n
-    message = pow(message, private_key[0], private_key[1])
-
-    #Bytes to integer conversion, then to bytes, +7 to approximate the nearest byte size that can accomodate the message
-    byte_len = (message.bit_length() + 7) // 8
-
-    #Decode back to string
-    message_bytes = message.to_bytes(byte_len, byteorder="big")
-
+def decrypt(ciphertext, private_key):
+    n_bytes = (private_key[1].bit_length() + 7) // 8
+    m_int = pow(ciphertext, private_key[0], private_key[1])
+    em = m_int.to_bytes(n_bytes, "big")
+    message_bytes = oaep_decode(em, n_bytes)
     return message_bytes.decode("utf-8")
+
+def mgf1(seed, length, hash_func=hashlib.sha256):
+    counter = 0
+    output = b""
+    while len(output) < length:
+        C = counter.to_bytes(4, byteorder="big")
+        output += hash_func(seed + C).digest()
+        counter += 1
+    return output[:length]
+
+def oaep_encode(message, k, label=b"", hash_func=hashlib.sha256):
+    # k: length of modulus in bytes
+    mLen = len(message)
+    hLen = hash_func().digest_size
+    lHash = hash_func(label).digest()
+    ps = b"\x00" * (k - mLen - 2 * hLen - 2)
+    db = lHash + ps + b"\x01" + message
+    seed = os.urandom(hLen)
+    dbMask = mgf1(seed, k - hLen - 1, hash_func)
+    maskedDB = bytes([db[i] ^ dbMask[i] for i in range(len(db))])
+    seedMask = mgf1(maskedDB, hLen, hash_func)
+    maskedSeed = bytes([seed[i] ^ seedMask[i] for i in range(hLen)])
+    return b"\x00" + maskedSeed + maskedDB
+
+def oaep_decode(em, k, label=b"", hash_func=hashlib.sha256):
+    hLen = hash_func().digest_size
+    lHash = hash_func(label).digest()
+    if len(em) != k or em[0] != 0:
+        raise ValueError("Decryption error")
+    maskedSeed = em[1:hLen+1]
+    maskedDB = em[hLen+1:]
+    seedMask = mgf1(maskedDB, hLen, hash_func)
+    seed = bytes([maskedSeed[i] ^ seedMask[i] for i in range(hLen)])
+    dbMask = mgf1(seed, k - hLen - 1, hash_func)
+    db = bytes([maskedDB[i] ^ dbMask[i] for i in range(len(maskedDB))])
+    lHash_ = db[:hLen]
+    if lHash_ != lHash:
+        raise ValueError("Decryption error")
+    # Find the 0x01 separator
+    i = hLen
+    while i < len(db):
+        if db[i] == 1:
+            break
+        elif db[i] != 0:
+            raise ValueError("Decryption error")
+        i += 1
+    return db[i+1:]
 
 import tkinter as tk
 from tkinter import messagebox, scrolledtext, filedialog
