@@ -172,6 +172,18 @@ class RSAGUI:
         self.decrypted_text = tk.Label(self.decrypt_frame, text="Decrypted Message: ")
         self.decrypted_text.pack()
 
+        # Process Output Section
+        self.process_frame = tk.LabelFrame(master, text="Encryption/Decryption Process")
+        self.process_frame.pack(padx=10, pady=5, fill="both", expand=True)
+        self.process_output = scrolledtext.ScrolledText(self.process_frame, height=12, width=80, state="normal")
+        self.process_output.pack(fill="both", expand=True)
+
+    def log_process(self, text):
+        self.process_output.config(state="normal")
+        self.process_output.insert(tk.END, text + "\n")
+        self.process_output.see(tk.END)
+        self.process_output.config(state="disabled")
+
     def encrypt_file(self):
         file_path = filedialog.askopenfilename(title="Select file to encrypt")
         if file_path:
@@ -188,8 +200,21 @@ class RSAGUI:
 
     def generate_keys(self):
         self.public_key, self.private_key = keygenerator()
-        self.pub_key_label.config(text=f"Public Key: {self.public_key}")
-        self.priv_key_label.config(text=f"Private Key: {self.private_key}")
+        # Truncate key display for UI
+        def truncate_num(num, maxlen=10):
+            num_str = str(num)
+            if len(num_str) > maxlen * 2:
+                return num_str[:maxlen] + "..." + num_str[-maxlen:]
+            return num_str
+        def truncate_key(key):
+            e_or_d, n = key
+            return f"({truncate_num(e_or_d)}, {truncate_num(n)})"
+        self.pub_key_label.config(text=f"Public Key: {truncate_key(self.public_key)}")
+        self.priv_key_label.config(text=f"Private Key: {truncate_key(self.private_key)}")
+        self.process_output.config(state="normal")
+        self.process_output.delete("1.0", tk.END)
+        self.process_output.insert(tk.END, "Key generation completed.\n")
+        self.process_output.config(state="disabled")
 
     def encrypt_message(self):
         if not self.public_key:
@@ -197,12 +222,47 @@ class RSAGUI:
             return
         msg = self.msg_entry.get()
         try:
-            encrypted = encrypt(msg, self.public_key)
+            self.process_output.config(state="normal")
+            self.process_output.delete("1.0", tk.END)
+            self.log_process("=== Encryption Process ===")
+            n_bytes = (self.public_key[1].bit_length() + 7) // 8
+            message_bytes = msg.encode()
+            self.log_process(f"Original message: {msg}")
+            self.log_process(f"Message bytes: {message_bytes.hex()}")
+
+            # OAEP Padding process (step by step)
+            hLen = hashlib.sha256().digest_size
+            lHash = hashlib.sha256(b"").digest()
+            self.log_process(f"OAEP lHash (SHA-256 of label): {lHash.hex()}")
+            ps = b"\x00" * (n_bytes - len(message_bytes) - 2 * hLen - 2)
+            self.log_process(f"OAEP padding string (ps): {ps.hex()}")
+            db = lHash + ps + b"\x01" + message_bytes
+            self.log_process(f"OAEP data block (DB): {db.hex()}")
+            seed = os.urandom(hLen)
+            self.log_process(f"OAEP random seed: {seed.hex()}")
+            dbMask = mgf1(seed, n_bytes - hLen - 1)
+            self.log_process(f"OAEP dbMask: {dbMask.hex()}")
+            maskedDB = bytes([db[i] ^ dbMask[i] for i in range(len(db))])
+            self.log_process(f"OAEP maskedDB: {maskedDB.hex()}")
+            seedMask = mgf1(maskedDB, hLen)
+            self.log_process(f"OAEP seedMask: {seedMask.hex()}")
+            maskedSeed = bytes([seed[i] ^ seedMask[i] for i in range(hLen)])
+            self.log_process(f"OAEP maskedSeed: {maskedSeed.hex()}")
+            em = b"\x00" + maskedSeed + maskedDB
+            self.log_process(f"OAEP encoded message (EM): {em.hex()}")
+
+            # Continue with encryption
+            m_int = int.from_bytes(em, "big")
+            self.log_process(f"OAEP encoded as integer: {m_int}")
+            cyphertext = pow(m_int, self.public_key[0], self.public_key[1])
+            self.log_process(f"Ciphertext integer: {cyphertext}")
             self.encrypted_text.delete("1.0", tk.END)
-            self.encrypted_text.insert(tk.END, str(encrypted))
+            self.encrypted_text.insert(tk.END, str(cyphertext))
             self.decrypt_entry.delete(0, tk.END)
-            self.decrypt_entry.insert(0, str(encrypted))
+            self.decrypt_entry.insert(0, str(cyphertext))
+            self.process_output.config(state="disabled")
         except Exception as e:
+            self.process_output.config(state="disabled")
             messagebox.showerror("Encryption Error", str(e))
 
     def decrypt_message(self):
@@ -210,10 +270,24 @@ class RSAGUI:
             messagebox.showerror("Error", "Please generate keys first.")
             return
         try:
+            self.process_output.config(state="normal")
+            self.process_output.delete("1.0", tk.END)
+            self.log_process("=== Decryption Process ===")
             encrypted = int(self.decrypt_entry.get())
-            decrypted = decrypt(encrypted, self.private_key)
+            self.log_process(f"Ciphertext integer: {encrypted}")
+            n_bytes = (self.private_key[1].bit_length() + 7) // 8
+            m_int = pow(encrypted, self.private_key[0], self.private_key[1])
+            self.log_process(f"Decrypted integer: {m_int}")
+            em = m_int.to_bytes(n_bytes, "big")
+            self.log_process(f"OAEP decoded (hex): {em.hex()}")
+            message_bytes = oaep_decode(em, n_bytes)
+            self.log_process(f"Recovered message bytes: {message_bytes.hex()}")
+            decrypted = message_bytes.decode("utf-8")
+            self.log_process(f"Decrypted message: {decrypted}")
             self.decrypted_text.config(text=f"Decrypted Message: {decrypted}")
+            self.process_output.config(state="disabled")
         except Exception as e:
+            self.process_output.config(state="disabled")
             messagebox.showerror("Decryption Error", str(e))
 
 if __name__ == "__main__":
