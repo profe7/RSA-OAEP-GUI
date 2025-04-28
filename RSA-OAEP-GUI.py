@@ -81,72 +81,6 @@ def decrypt(message, private_key):
 
     return message_bytes.decode("utf-8")
 
-#
-def mgf1(seed, length):
-    counter = 0
-    output = b""
-
-    while len(output) < length:
-        C = counter.to_bytes(4, byteorder="big")
-        output += hashlib.sha256(seed + C).digest()
-        counter += 1
-
-    return output[:length]
-
-def oaep_padding(message, key_size=256, k0=32, k1=32):
-    n = key_size - k0 - k1
-    # Pad message to n bytes
-    message = message.ljust(n, b'\x00')
-    # Random r
-    r = os.urandom(k0)
-    # G(r)
-    G_r = mgf1(r, n)
-    X = bytes(x ^ y for x, y in zip(message, G_r))
-    # H(X)
-    H_X = mgf1(X, k0)
-    Y = bytes(x ^ y for x, y in zip(r, H_X))
-    return X + Y
-
-def oaep_unpadding(padded, key_size=256, k0=32, k1=32):
-    n = key_size - k0 - k1
-    if len(padded) != n + k0:
-        raise ValueError("Invalid padded message length!")
-    X = padded[:n]
-    Y = padded[n:]
-    H_X = mgf1(X, k0)
-    r = bytes(x ^ y for x, y in zip(Y, H_X))
-    G_r = mgf1(r, n)
-    message = bytes(x ^ y for x, y in zip(X, G_r))
-    # Remove zero padding
-    return message.rstrip(b'\x00')
-
-def encrypt_oaep(message, public_key):
-    # OAEP pad the message
-    key_size_bytes = (public_key[1].bit_length() + 7) // 8
-    padded = oaep_padding(message.encode('utf-8'), key_size=key_size_bytes)
-    m_int = int.from_bytes(padded, 'big')
-    if m_int >= public_key[1]:
-        raise ValueError("Message too long for the key size")
-    c = pow(m_int, public_key[0], public_key[1])
-    return c
-
-def decrypt_oaep(ciphertext, private_key):
-    key_size_bytes = (private_key[1].bit_length() + 7) // 8
-    m_int = pow(ciphertext, private_key[0], private_key[1])
-    padded = m_int.to_bytes(key_size_bytes, 'big')
-    message = oaep_unpadding(padded, key_size=key_size_bytes)
-    return message.decode('utf-8', errors='ignore')
-
-#Debug
-<<<<<<< Updated upstream
-if __name__ == "__main__":
-    public_key, private_key = keygenerator()
-    print("Public Key:", public_key)
-    print("Private Key:", private_key)
-    print("e:", public_key[0])
-    print("d:", private_key[0])
-=======
-
 import tkinter as tk
 from tkinter import messagebox, scrolledtext, filedialog
 
@@ -223,7 +157,8 @@ class RSAGUI:
             return
         msg = self.msg_entry.get()
         try:
-            encrypted = encrypt(msg, self.public_key)
+            # Use OAEP encryption
+            encrypted = encrypt_oaep(msg, self.public_key)
             self.encrypted_text.delete("1.0", tk.END)
             self.encrypted_text.insert(tk.END, str(encrypted))
             self.decrypt_entry.delete(0, tk.END)
@@ -237,30 +172,95 @@ class RSAGUI:
             return
         try:
             encrypted = int(self.decrypt_entry.get())
-            decrypted = decrypt(encrypted, self.private_key)
+            # Use OAEP decryption
+            decrypted = decrypt_oaep(encrypted, self.private_key)
             self.decrypted_text.config(text=f"Decrypted Message: {decrypted}")
         except Exception as e:
             messagebox.showerror("Decryption Error", str(e))
 
-# if __name__ == "__main__":
-#     public_key, private_key = keygenerator()
-#     print("Public Key:", public_key)
-#     print("Private Key:", private_key)
-#     print("e:", public_key[0])
-#     print("d:", private_key[0])
->>>>>>> Stashed changes
 
-#     input_message = input("Enter a message to encrypt: ")
-#     print("Original message:", input_message)
-#     input_message_bytes = input_message.encode(encoding="utf-8")
-#     encrypted_message = encrypt(input_message, public_key)
-#     print("Encrypted message (plain RSA):", encrypted_message)
-#     decrypted_message = decrypt(encrypted_message, private_key)
-#     print("Decrypted message (plain RSA):", decrypted_message)
+#
+def mgf1(seed, length):
+    counter = 0
+    output = b""
 
-#     # RSA-OAEP
-#     encrypted_oaep = encrypt_oaep(input_message, public_key)
-#     print("Encrypted message (RSA-OAEP):", encrypted_oaep)
-#     decrypted_oaep = decrypt_oaep(encrypted_oaep, private_key)
-#     print("Decrypted message (RSA-OAEP):", decrypted_oaep)
+    while len(output) < length:
+        C = counter.to_bytes(4, byteorder="big")
+        output += hashlib.sha256(seed + C).digest()
+        counter += 1
+
+    return output[:length]
+
+def oaep_padding(message, key_size=256, k0=32, k1=32):
+    n = key_size - k0 - k1
+    if len(message) > n:
+        raise ValueError("Message too long for OAEP padding")
+    
+    # Step 1: m' = message || 0^k1
+    m_padded = message + b'\x00' * k1
+
+    # Step 2: generate random seed r
+    r = os.urandom(k0)
+
+    # Step 3: s = (m' ⊕ G(r))
+    G_r = mgf1(r, n + k1)
+    s = bytes(x ^ y for x, y in zip(m_padded, G_r))
+
+    # Step 4: t = (r ⊕ H(s))
+    H_s = mgf1(s, k0)
+    t = bytes(x ^ y for x, y in zip(r, H_s))
+
+    return s + t
+
+def oaep_unpadding(padded, key_size=256, k0=32, k1=32):
+    n = key_size - k0 - k1
+    if len(padded) != key_size:
+        raise ValueError("Invalid padded message length")
+    
+    s = padded[:n + k1]
+    t = padded[n + k1:]
+
+    # Step 2: recover r = t ⊕ H(s)
+    H_s = mgf1(s, k0)
+    r = bytes(x ^ y for x, y in zip(t, H_s))
+
+    # Step 3: recover m' = s ⊕ G(r)
+    G_r = mgf1(r, n + k1)
+    m_padded = bytes(x ^ y for x, y in zip(s, G_r))
+
+    # Step 4: Extract original message
+    m, padding = m_padded[:-k1], m_padded[-k1:]
+
+    if padding != b'\x00' * k1:
+        raise ValueError("OAEP unpadding failed: invalid integrity padding")
+    
+    return m
+
+def encrypt_oaep(message, public_key):
+    # OAEP pad the message
+    key_size_bytes = (public_key[1].bit_length() + 7) // 8
+    padded = oaep_padding(message.encode('utf-8'), key_size=key_size_bytes)
+    m_int = int.from_bytes(padded, 'big')
+    if m_int >= public_key[1]:
+        raise ValueError("Message too long for the key size")
+    c = pow(m_int, public_key[0], public_key[1])
+    return c
+
+def decrypt_oaep(ciphertext, private_key):
+    key_size_bytes = (private_key[1].bit_length() + 7) // 8
+    m_int = pow(ciphertext, private_key[0], private_key[1])
+    padded = m_int.to_bytes(key_size_bytes, 'big')
+    message = oaep_unpadding(padded, key_size=key_size_bytes)
+    return message.decode('utf-8', errors='ignore')
+
+#Debug
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = RSAGUI(root)
+    root.mainloop()
+    # public_key, private_key = keygenerator()
+    # print("Public Key:", public_key)
+    # print("Private Key:", private_key)
+    # print("e:", public_key[0])
+    # print("d:", private_key[0])
 
