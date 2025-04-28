@@ -6,6 +6,8 @@
 
 from sympy import randprime
 from random import randint
+import os
+import hashlib
 
 def randomprimegenerator(bits):
     #Lower bound if 2048 2^2047
@@ -78,7 +80,63 @@ def decrypt(message, private_key):
     message_bytes = message.to_bytes(byte_len, byteorder="big")
 
     return message_bytes.decode("utf-8")
-    
+
+#
+def mgf1(seed, length):
+    counter = 0
+    output = b""
+
+    while len(output) < length:
+        C = counter.to_bytes(4, byteorder="big")
+        output += hashlib.sha256(seed + C).digest()
+        counter += 1
+
+    return output[:length]
+
+def oaep_padding(message, key_size=256, k0=32, k1=32):
+    n = key_size - k0 - k1
+    # Pad message to n bytes
+    message = message.ljust(n, b'\x00')
+    # Random r
+    r = os.urandom(k0)
+    # G(r)
+    G_r = mgf1(r, n)
+    X = bytes(x ^ y for x, y in zip(message, G_r))
+    # H(X)
+    H_X = mgf1(X, k0)
+    Y = bytes(x ^ y for x, y in zip(r, H_X))
+    return X + Y
+
+def oaep_unpadding(padded, key_size=256, k0=32, k1=32):
+    n = key_size - k0 - k1
+    if len(padded) != n + k0:
+        raise ValueError("Invalid padded message length!")
+    X = padded[:n]
+    Y = padded[n:]
+    H_X = mgf1(X, k0)
+    r = bytes(x ^ y for x, y in zip(Y, H_X))
+    G_r = mgf1(r, n)
+    message = bytes(x ^ y for x, y in zip(X, G_r))
+    # Remove zero padding
+    return message.rstrip(b'\x00')
+
+def encrypt_oaep(message, public_key):
+    # OAEP pad the message
+    key_size_bytes = (public_key[1].bit_length() + 7) // 8
+    padded = oaep_padding(message.encode('utf-8'), key_size=key_size_bytes)
+    m_int = int.from_bytes(padded, 'big')
+    if m_int >= public_key[1]:
+        raise ValueError("Message too long for the key size")
+    c = pow(m_int, public_key[0], public_key[1])
+    return c
+
+def decrypt_oaep(ciphertext, private_key):
+    key_size_bytes = (private_key[1].bit_length() + 7) // 8
+    m_int = pow(ciphertext, private_key[0], private_key[1])
+    padded = m_int.to_bytes(key_size_bytes, 'big')
+    message = oaep_unpadding(padded, key_size=key_size_bytes)
+    return message.decode('utf-8', errors='ignore')
+
 #Debug
 if __name__ == "__main__":
     public_key, private_key = keygenerator()
@@ -89,8 +147,15 @@ if __name__ == "__main__":
 
     input_message = input("Enter a message to encrypt: ")
     print("Original message:", input_message)
+    input_message_bytes = input_message.encode(encoding="utf-8")
     encrypted_message = encrypt(input_message, public_key)
-    print("Encrypted message:", encrypted_message)
+    print("Encrypted message (plain RSA):", encrypted_message)
     decrypted_message = decrypt(encrypted_message, private_key)
-    print("Decrypted message:", decrypted_message)
+    print("Decrypted message (plain RSA):", decrypted_message)
+
+    # RSA-OAEP
+    encrypted_oaep = encrypt_oaep(input_message, public_key)
+    print("Encrypted message (RSA-OAEP):", encrypted_oaep)
+    decrypted_oaep = decrypt_oaep(encrypted_oaep, private_key)
+    print("Decrypted message (RSA-OAEP):", decrypted_oaep)
 
