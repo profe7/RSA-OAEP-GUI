@@ -30,3 +30,23 @@
 #### Explained in code
 ![alt text](image-5.png)
 #### Explained in code
+
+## 3. Why is this code RSA-OAEP?
+### Padding before encryption:
+![alt text](image-6.png)
+#### The function oaep_encode takes message and applies OAEP padding.
+### Unpadding after decryption:
+![alt text](image-7.png)
+#### The function oaep_decode reverses the encode process.
+### RSA Encrytption
+![alt text](image-8.png)
+#### The encrypt function
+1. Pads the message with OAEP
+2. Converts the padded message to an integer
+3. Encrypts it using RSA
+### RSA decrypt function
+![alt text](image-9.png)
+#### The decrypt function
+1. Decrypts the ciphertext using RSA
+2. Converts the result back to bytes
+3. Removes OAEP padding
