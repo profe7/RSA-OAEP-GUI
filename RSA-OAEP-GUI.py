@@ -78,19 +78,103 @@ def decrypt(message, private_key):
     message_bytes = message.to_bytes(byte_len, byteorder="big")
 
     return message_bytes.decode("utf-8")
-    
-#Debug
+
+import tkinter as tk
+from tkinter import messagebox, scrolledtext, filedialog
+
+class RSAGUI:
+    def __init__(self, master):
+        self.master = master
+        master.title("RSA Encryption/Decryption GUI")
+
+        self.public_key = None
+        self.private_key = None
+
+        # Key Generation
+        self.key_frame = tk.LabelFrame(master, text="Key Generation")
+        self.key_frame.pack(padx=10, pady=5, fill="x")
+
+        self.gen_key_btn = tk.Button(self.key_frame, text="Generate Keys", command=self.generate_keys)
+        self.gen_key_btn.pack(pady=5)
+
+        self.pub_key_label = tk.Label(self.key_frame, text="Public Key: None")
+        self.pub_key_label.pack()
+        self.priv_key_label = tk.Label(self.key_frame, text="Private Key: None")
+        self.priv_key_label.pack()
+
+        # Encryption
+        self.encrypt_frame = tk.LabelFrame(master, text="Encryption")
+        self.encrypt_frame.pack(padx=10, pady=5, fill="x")
+
+        self.msg_entry = tk.Entry(self.encrypt_frame, width=50)
+        self.msg_entry.pack(pady=5)
+        self.encrypt_btn = tk.Button(self.encrypt_frame, text="Encrypt", command=self.encrypt_message)
+        self.encrypt_btn.pack(pady=5)
+        self.encrypted_text = scrolledtext.ScrolledText(self.encrypt_frame, height=3, width=60)
+        self.encrypted_text.pack()
+
+        # File Encryption
+        self.file_encrypt_btn = tk.Button(self.encrypt_frame, text="Encrypt File", command=self.encrypt_file)
+        self.file_encrypt_btn.pack(pady=5)
+        self.file_label = tk.Label(self.encrypt_frame, text="No file selected")
+        self.file_label.pack()
+
+        # Decryption
+        self.decrypt_frame = tk.LabelFrame(master, text="Decryption")
+        self.decrypt_frame.pack(padx=10, pady=5, fill="x")
+
+        self.decrypt_entry = tk.Entry(self.decrypt_frame, width=50)
+        self.decrypt_entry.pack(pady=5)
+        self.decrypt_btn = tk.Button(self.decrypt_frame, text="Decrypt", command=self.decrypt_message)
+        self.decrypt_btn.pack(pady=5)
+        self.decrypted_text = tk.Label(self.decrypt_frame, text="Decrypted Message: ")
+        self.decrypted_text.pack()
+
+    def encrypt_file(self):
+        file_path = filedialog.askopenfilename(title="Select file to encrypt")
+        if file_path:
+            try:
+                with open(file_path, "rb") as f:
+                    file_data = f.read()
+                self.file_label.config(text=f"Loaded: {file_path}")
+                # Placeholder: actual encryption not implemented yet
+                messagebox.showinfo("File Loaded", f"File '{file_path}' loaded successfully.\n(Size: {len(file_data)} bytes)")
+            except Exception as e:
+                messagebox.showerror("File Error", f"Failed to load file: {e}")
+        else:
+            self.file_label.config(text="No file selected")
+
+    def generate_keys(self):
+        self.public_key, self.private_key = keygenerator()
+        self.pub_key_label.config(text=f"Public Key: {self.public_key}")
+        self.priv_key_label.config(text=f"Private Key: {self.private_key}")
+
+    def encrypt_message(self):
+        if not self.public_key:
+            messagebox.showerror("Error", "Please generate keys first.")
+            return
+        msg = self.msg_entry.get()
+        try:
+            encrypted = encrypt(msg, self.public_key)
+            self.encrypted_text.delete("1.0", tk.END)
+            self.encrypted_text.insert(tk.END, str(encrypted))
+            self.decrypt_entry.delete(0, tk.END)
+            self.decrypt_entry.insert(0, str(encrypted))
+        except Exception as e:
+            messagebox.showerror("Encryption Error", str(e))
+
+    def decrypt_message(self):
+        if not self.private_key:
+            messagebox.showerror("Error", "Please generate keys first.")
+            return
+        try:
+            encrypted = int(self.decrypt_entry.get())
+            decrypted = decrypt(encrypted, self.private_key)
+            self.decrypted_text.config(text=f"Decrypted Message: {decrypted}")
+        except Exception as e:
+            messagebox.showerror("Decryption Error", str(e))
+
 if __name__ == "__main__":
-    public_key, private_key = keygenerator()
-    print("Public Key:", public_key)
-    print("Private Key:", private_key)
-    print("e:", public_key[0])
-    print("d:", private_key[0])
-
-    input_message = input("Enter a message to encrypt: ")
-    print("Original message:", input_message)
-    encrypted_message = encrypt(input_message, public_key)
-    print("Encrypted message:", encrypted_message)
-    decrypted_message = decrypt(encrypted_message, private_key)
-    print("Decrypted message:", decrypted_message)
-
+    root = tk.Tk()
+    app = RSAGUI(root)
+    root.mainloop()
